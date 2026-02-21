@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: media-scraper-redis
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: media-scraper-api
+    ports:
+      - '${PORT:-3000}:3000'
+    env_file: .env
+    environment:
+      - REDIS_HOST=redis
+      - NODE_ENV=production
+    volumes:
+      - tmp_data:/app/tmp
+      - logs_data:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:3000/api/v1/health']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: media-scraper-worker
+    command: node src/workers/media.worker.js
+    env_file: .env
+    environment:
+      - REDIS_HOST=redis
+      - NODE_ENV=production
+    volumes:
+      - tmp_data:/app/tmp
+      - logs_data:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+  tmp_data:
+  logs_data:
